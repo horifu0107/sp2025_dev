@@ -36,7 +36,7 @@ services:
     ports:
       - ${DATABASE_PORT_OUTER}:${DATABASE_PORT_INNER}
     volumes:
-      - db:/var/lib/postgres/data
+      - sp2025_dev_db:/var/lib/postgresql/data
     environment:
       POSTGRES_USER: ${DATABASE_USERNAME}
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
@@ -49,5 +49,5 @@ services:
       start_period: 30s
 
 volumes:
-  db:
+  sp2025_dev_db:
     driver: local
