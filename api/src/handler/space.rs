@@ -1,25 +1,25 @@
+use crate::model::space::{CreateSpaceRequest, SpaceResponse};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
+use kernel::model::id::SpaceId;
 use registry::AppRegistry;
+use shared::error::AppError;
 use thiserror::Error;
-use uuid::Uuid;
 
-use crate::model::space::{SpaceResponse, CreateSpaceRequest};
-
-#[derive(Error, Debug)]
-pub enum AppError {
-    #[error("{0}")]
-    InternalError(#[from] anyhow::Error),
-}
-impl IntoResponse for AppError {
-    fn into_response(self) -> Response {
-        (StatusCode::INTERNAL_SERVER_ERROR, "").into_response()
-    }
-}
+// #[derive(Error, Debug)]
+// pub enum AppError {
+//     #[error("{0}")]
+//     InternalError(#[from] anyhow::Error),
+// }
+// impl IntoResponse for AppError {
+//     fn into_response(self) -> Response {
+//         (StatusCode::INTERNAL_SERVER_ERROR, "").into_response()
+//     }
+// }
 
 pub async fn register_space(
     State(registry): State<AppRegistry>,
@@ -46,7 +46,7 @@ pub async fn show_space_list(
 }
 
 pub async fn show_space(
-    Path(space_id): Path<Uuid>,
+    Path(space_id): Path<SpaceId>,
     State(registry): State<AppRegistry>,
 ) -> Result<Json<SpaceResponse>, AppError> {
     registry
@@ -55,7 +55,7 @@ pub async fn show_space(
         .await
         .and_then(|bc| match bc {
             Some(bc) => Ok(Json(bc.into())),
-            None => Err(anyhow::anyhow!("The specific space was not found")),
+            None => Err(AppError::EntityNotFound("not found".into())),
         })
         .map_err(AppError::from)
 }

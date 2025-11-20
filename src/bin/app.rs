@@ -1,37 +1,50 @@
-use std::net::{Ipv4Addr, SocketAddr};
-use adapter::database::connect_database_with;
+use adapter::{database::connect_database_with,redis::RedisClient};
 use anyhow::{Error, Result};
-use api::route::health::build_health_check_routers;
-use api::route::space::build_space_routers;
+use api::route::{
+    health::build_health_check_routers,
+    space::build_space_routers,
+    auth};
 use axum::Router;
 use registry::AppRegistry;
 use shared::config::AppConfig;
-use tokio::net::TcpListener;
 use std::error::Error as StdError;
+use std::{
+    net::{Ipv4Addr, SocketAddr},
+    sync::Arc};
+use tokio::net::TcpListener;
 
-use yup_oauth2::{InstalledFlowAuthenticator, InstalledFlowReturnMethod};
 use base64::{engine::general_purpose, Engine as _};
-use reqwest::Client;
-use std::{collections::HashSet,  time::Duration};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use sqlx::{postgres::PgPoolOptions,PgPool,FromRow};
-use uuid::Uuid;
+use reqwest::Client;
+use sqlx::{postgres::PgPoolOptions, FromRow, PgPool};
+use std::{collections::HashSet, time::Duration};
 use tokio::time::sleep;
+use uuid::Uuid;
+use yup_oauth2::{InstalledFlowAuthenticator, InstalledFlowReturnMethod};
 
+use shared::env::{which, Environment};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
 
+use anyhow::Context;
+use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tower_http::LatencyUnit;
+use tracing::Level;
 #[derive(Debug, FromRow)]
 struct Space {
     space_id: Uuid,
     space_name: String,
-    created_at:DateTime<Utc>,
+    created_at: DateTime<Utc>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    init_logger()?;
     bootstrap().await
 }
 
-pub async fn reminder_loop()  ->  Result<(), Box<dyn StdError>>{
+pub async fn reminder_loop() -> Result<(), Box<dyn StdError>> {
     // --------------------------
     // Gmail OAuth2 認証
     // --------------------------
@@ -44,10 +57,10 @@ pub async fn reminder_loop()  ->  Result<(), Box<dyn StdError>>{
         .build()
         .await?;
 
-    let token = auth.token(&["https://www.googleapis.com/auth/gmail.send"]).await?;
+    let token = auth
+        .token(&["https://www.googleapis.com/auth/gmail.send"])
+        .await?;
     let access_token = token.token().unwrap().to_string();
-
-
 
     let pool = PgPoolOptions::new()
         .connect("postgresql://localhost:5432/app?user=app&password=passwd")
@@ -59,11 +72,10 @@ pub async fn reminder_loop()  ->  Result<(), Box<dyn StdError>>{
     loop {
         println!("Polling database at: {}", Utc::now());
 
-        let rows = sqlx::query_as::<_, Space>(
-            "SELECT space_id, space_name, created_at FROM spaces",
-        )
-        .fetch_all(&pool)
-        .await?;
+        let rows =
+            sqlx::query_as::<_, Space>("SELECT space_id, space_name, created_at FROM spaces")
+                .fetch_all(&pool)
+                .await?;
 
         let now = Utc::now();
 
@@ -77,7 +89,7 @@ pub async fn reminder_loop()  ->  Result<(), Box<dyn StdError>>{
 
             if now >= target_time {
                 // 実行
-                send_gmail(&access_token,row.space_id,row.created_at).await;
+                send_gmail(&access_token, row.space_id, row.created_at).await;
 
                 // 二重実行を防ぐ
                 executed.insert(row.space_id);
@@ -92,30 +104,67 @@ pub async fn reminder_loop()  ->  Result<(), Box<dyn StdError>>{
     Ok(())
 }
 
+fn init_logger() -> Result<()> {
+    let log_level = match which() {
+        Environment::Development => "debug",
+        Environment::Production => "info",
+    };
+
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| log_level.into());
+
+    let subscriber = tracing_subscriber::fmt::layer()
+        .with_file(true)
+        .with_line_number(true)
+        .with_target(false);
+
+    tracing_subscriber::registry()
+        .with(subscriber)
+        .with(env_filter)
+        .try_init()?;
+
+    Ok(())
+}
+
 async fn bootstrap() -> Result<()> {
     let app_config = AppConfig::new()?;
     let pool = connect_database_with(&app_config.database);
+    let kv = Arc::new(RedisClient::new(&app_config.redis)?);
 
-    let registry = AppRegistry::new(pool.clone());
-    
-    // tokio::spawn(async move {
-    //     reminder_loop(pool).await;
+    let registry = AppRegistry::new(pool, kv, app_config);
+
+    //     tokio::spawn(async move {
+    //     if let Err(e) = reminder_loop().await {
+    //         eprintln!("reminder_loop error: {:?}", e);
+    //     }
     // });
-    tokio::spawn(async move {
-    if let Err(e) = reminder_loop().await {
-        eprintln!("reminder_loop error: {:?}", e);
-    }
-});
 
     let app = Router::new()
         .merge(build_health_check_routers())
         .merge(build_space_routers())
+        .merge(auth::routes())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
+                .on_request(DefaultOnRequest::new().level(Level::INFO))
+                .on_response(
+                    DefaultOnResponse::new()
+                        .level(Level::INFO)
+                        .latency_unit(LatencyUnit::Millis),
+                ),
+        )
         .with_state(registry);
 
     let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8080);
     let listener = TcpListener::bind(addr).await?;
-    println!("Listening on {}", addr);
-    axum::serve(listener, app).await.map_err(Error::from)
+    tracing::info!("Listening on {}", addr);
+    axum::serve(listener, app)
+        .await
+        .context("Unexpected error happened in server")
+        .inspect_err(|e| {
+            tracing::error!(
+                error.cause_chain = ?e,error.message = %e, "Unexpected error"
+            )
+        })
 }
 
 // ----------------------------------------------
@@ -124,11 +173,12 @@ async fn bootstrap() -> Result<()> {
 async fn send_gmail(
     access_token: &str,
     space_id: Uuid,
-    created_at: DateTime<Utc>
+    created_at: DateTime<Utc>,
 ) -> Result<(), Box<dyn StdError>> {
     println!(
         ">>> [ACTION] Triggered for space_id={} at {}",
-        space_id, Utc::now()
+        space_id,
+        Utc::now()
     );
     let to = "horikawa0107tokyo@gmail.com";
     let subject = format!("スペースID {} の通知", space_id);

@@ -5,5 +5,5 @@ pub struct CreateSpace {
     pub description: String,
     pub capacity: i32,
     pub equipment: String,
-    pub address:String,
+    pub address: String,
 }

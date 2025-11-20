@@ -1,6 +1,8 @@
-use kernel::model::space::{event::CreateSpace, Space};
+use kernel::model::{
+    id::SpaceId,
+    space::{event::CreateSpace, Space},
+};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -11,7 +13,7 @@ pub struct CreateSpaceRequest {
     pub description: String,
     pub capacity: i32,
     pub equipment: String,
-    pub address:String,
+    pub address: String,
 }
 
 impl From<CreateSpaceRequest> for CreateSpace {
@@ -23,7 +25,7 @@ impl From<CreateSpaceRequest> for CreateSpace {
             description,
             capacity,
             equipment,
-            address
+            address,
         } = value;
         CreateSpace {
             space_name,
@@ -32,7 +34,7 @@ impl From<CreateSpaceRequest> for CreateSpace {
             description,
             capacity,
             equipment,
-            address
+            address,
         }
     }
 }
@@ -40,14 +42,14 @@ impl From<CreateSpaceRequest> for CreateSpace {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpaceResponse {
-    pub id: Uuid,
+    pub id: SpaceId,
     pub space_name: String,
     pub owner: String,
     pub is_active: bool,
     pub description: String,
     pub capacity: i32,
     pub equipment: String,
-    pub address:String,
+    pub address: String,
 }
 
 impl From<Space> for SpaceResponse {
@@ -60,7 +62,7 @@ impl From<Space> for SpaceResponse {
             description,
             capacity,
             equipment,
-            address
+            address,
         } = value;
         Self {
             id,
@@ -70,7 +72,7 @@ impl From<Space> for SpaceResponse {
             description,
             capacity,
             equipment,
-            address
+            address,
         }
     }
 }

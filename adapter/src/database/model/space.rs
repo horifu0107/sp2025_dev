@@ -1,15 +1,14 @@
-use kernel::model::space::Space;
-use uuid::Uuid;
+use kernel::model::{id::SpaceId, space::Space};
 
 pub struct SpaceRow {
-    pub space_id:Uuid,
+    pub space_id: SpaceId,
     pub space_name: String,
     pub owner: String,
     pub is_active: bool,
     pub description: String,
     pub capacity: i32,
     pub equipment: String,
-    pub address:String,
+    pub address: String,
 }
 
 impl From<SpaceRow> for Space {
@@ -22,7 +21,7 @@ impl From<SpaceRow> for Space {
             description,
             capacity,
             equipment,
-            address
+            address,
         } = value;
         Self {
             id: space_id,
@@ -32,7 +31,7 @@ impl From<SpaceRow> for Space {
             description,
             capacity,
             equipment,
-            address
+            address,
         }
     }
 }

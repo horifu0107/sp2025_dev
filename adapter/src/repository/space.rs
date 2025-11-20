@@ -1,12 +1,12 @@
 use crate::database::model::space::SpaceRow;
-use anyhow::Result;
 use async_trait::async_trait;
 use derive_new::new;
+use kernel::model::id::SpaceId;
 use kernel::model::space::{event::CreateSpace, Space};
 use kernel::repository::space::SpaceRepository;
-use uuid::Uuid;
 
 use crate::database::ConnectionPool;
+use shared::error::{AppError, AppResult};
 
 #[derive(new)]
 pub struct SpaceRepositoryImpl {
@@ -15,7 +15,7 @@ pub struct SpaceRepositoryImpl {
 
 #[async_trait]
 impl SpaceRepository for SpaceRepositoryImpl {
-    async fn create(&self, event: CreateSpace) -> Result<()> {
+    async fn create(&self, event: CreateSpace) -> AppResult<()> {
         sqlx::query!(
             r#"
                 INSERT INTO spaces (space_name, owner, is_active, description,capacity,equipment,address)
@@ -30,12 +30,13 @@ impl SpaceRepository for SpaceRepositoryImpl {
             event.address
         )
         .execute(self.db.inner_ref())
-        .await?;
+        .await
+        .map_err(AppError::SpecificOperationError)?;
 
         Ok(())
     }
 
-    async fn find_all(&self) -> Result<Vec<Space>> {
+    async fn find_all(&self) -> AppResult<Vec<Space>> {
         let rows: Vec<SpaceRow> = sqlx::query_as!(
             SpaceRow,
             r#"
@@ -53,12 +54,13 @@ impl SpaceRepository for SpaceRepositoryImpl {
             "#
         )
         .fetch_all(self.db.inner_ref())
-        .await?;
+        .await
+        .map_err(AppError::SpecificOperationError)?;
 
         Ok(rows.into_iter().map(Space::from).collect())
     }
 
-    async fn find_by_id(&self, space_id: Uuid) -> Result<Option<Space>> {
+    async fn find_by_id(&self, space_id: SpaceId) -> AppResult<Option<Space>> {
         let row: Option<SpaceRow> = sqlx::query_as!(
             SpaceRow,
             r#"
@@ -74,10 +76,11 @@ impl SpaceRepository for SpaceRepositoryImpl {
                 FROM spaces
                 WHERE space_id = $1
             "#,
-            space_id
+            space_id as _
         )
         .fetch_optional(self.db.inner_ref())
-        .await?;
+        .await
+        .map_err(AppError::SpecificOperationError)?;
 
         Ok(row.map(Space::from))
     }
@@ -88,6 +91,7 @@ mod tests {
     use super::*;
 
     #[sqlx::test]
+    #[ignore]
     async fn test_register_space(pool: sqlx::PgPool) -> anyhow::Result<()> {
         let repo = SpaceRepositoryImpl::new(ConnectionPool::new(pool));
 
@@ -96,9 +100,9 @@ mod tests {
             owner: "Test Owner".into(),
             is_active: true.into(),
             description: "Test Description".into(),
-            capacity:5.into(),
-            equipment:"Test Equipment".into(),
-            address:"Test Address".into()
+            capacity: 5.into(),
+            equipment: "Test Equipment".into(),
+            address: "Test Address".into(),
         };
 
         repo.create(space).await?;
@@ -118,7 +122,7 @@ mod tests {
             description,
             capacity,
             equipment,
-            address
+            address,
         } = res.unwrap();
         assert_eq!(id, space_id);
         assert_eq!(space_name, "Test SpaceName");

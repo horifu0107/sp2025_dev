@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS reservations (
 
 CREATE TABLE IF NOT EXISTS reminders (
   reminder_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  status VARCHAR(255) NOT NULL,
+  is_already BOOLEAN NOT NULL,
   reservation_id UUID NOT NULL ,
   remind_time TIMESTAMP(3) WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   FOREIGN KEY (reservation_id) REFERENCES reservations(reservation_id)
