@@ -1,13 +1,19 @@
-use crate::model::space::{CreateSpaceRequest, SpaceResponse};
-use axum::{
-    extract::{Path, State},
+use crate::{
+    extractor::AuthorizedUser,
+    model::space::{
+        SpaceListQuery, SpaceResponse, CreateSpaceRequest, PaginatedSpaceResponse, UpdateSpaceRequest,
+        UpdateSpaceRequestWithIds,
+    },
+};use axum::{
+    extract::{Path, Query,State},
     http::StatusCode,
-    response::{IntoResponse, Response},
     Json,
 };
-use kernel::model::id::SpaceId;
+use garde::Validate;
+use kernel::model::{space::event::DeleteSpace, id::SpaceId};
+
 use registry::AppRegistry;
-use shared::error::AppError;
+use shared::error::{AppError, AppResult};
 use thiserror::Error;
 
 // #[derive(Error, Debug)]
@@ -22,33 +28,39 @@ use thiserror::Error;
 // }
 
 pub async fn register_space(
+    user: AuthorizedUser,
     State(registry): State<AppRegistry>,
     Json(req): Json<CreateSpaceRequest>,
 ) -> Result<StatusCode, AppError> {
+    req.validate(&())?;
+
     registry
         .space_repository()
-        .create(req.into())
+        .create(req.into(), user.id())
         .await
         .map(|_| StatusCode::CREATED)
-        .map_err(AppError::from)
 }
 
 pub async fn show_space_list(
+    _user: AuthorizedUser,
+    Query(query): Query<SpaceListQuery>,
     State(registry): State<AppRegistry>,
-) -> Result<Json<Vec<SpaceResponse>>, AppError> {
+) ->  AppResult<Json<PaginatedSpaceResponse>> {
+    query.validate(&())?;
+
     registry
         .space_repository()
-        .find_all()
+        .find_all(query.into())
         .await
-        .map(|v| v.into_iter().map(SpaceResponse::from).collect::<Vec<_>>())
+        .map(PaginatedSpaceResponse::from)
         .map(Json)
-        .map_err(AppError::from)
 }
 
 pub async fn show_space(
+    _user: AuthorizedUser,
     Path(space_id): Path<SpaceId>,
     State(registry): State<AppRegistry>,
-) -> Result<Json<SpaceResponse>, AppError> {
+) -> AppResult<Json<SpaceResponse>> {
     registry
         .space_repository()
         .find_by_id(space_id)
@@ -57,5 +69,36 @@ pub async fn show_space(
             Some(bc) => Ok(Json(bc.into())),
             None => Err(AppError::EntityNotFound("not found".into())),
         })
-        .map_err(AppError::from)
+}
+
+pub async fn update_space(
+    user: AuthorizedUser,
+    Path(space_id): Path<SpaceId>,
+    State(registry): State<AppRegistry>,
+    Json(req): Json<UpdateSpaceRequest>,
+) -> AppResult<StatusCode> {
+    req.validate(&())?;
+
+    let update_space = UpdateSpaceRequestWithIds::new(space_id, user.id(), req);
+    registry
+        .space_repository()
+        .update(update_space.into())
+        .await
+        .map(|_| StatusCode::OK)
+}
+
+pub async fn delete_space(
+    user: AuthorizedUser,
+    Path(space_id): Path<SpaceId>,
+    State(registry): State<AppRegistry>,
+) -> AppResult<StatusCode> {
+    let delete_space = DeleteSpace {
+        space_id,
+        requested_user: user.id(),
+    };
+    registry
+        .space_repository()
+        .delete(delete_space)
+        .await
+        .map(|_| StatusCode::OK)
 }

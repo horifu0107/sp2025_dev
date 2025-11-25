@@ -2,13 +2,17 @@ use async_trait::async_trait;
 use shared::error::AppResult;
 
 use crate::model::{
-    id::SpaceId,
-    space::{event::CreateSpace, Space},
+    id::{SpaceId,UserId},
+    space::{event::{CreateSpace, DeleteSpace, UpdateSpace},
+        Space, SpaceListOptions,},
+    list::PaginatedList,
 };
 
 #[async_trait]
 pub trait SpaceRepository: Send + Sync {
-    async fn create(&self, event: CreateSpace) -> AppResult<()>;
-    async fn find_all(&self) -> AppResult<Vec<Space>>;
+    async fn create(&self, event: CreateSpace,user_id: UserId) -> AppResult<()>;
+    async fn find_all(&self,options: SpaceListOptions) -> AppResult<PaginatedList<Space>>;
     async fn find_by_id(&self, space_id: SpaceId) -> AppResult<Option<Space>>;
+    async fn update(&self, event: UpdateSpace) -> AppResult<()>;
+    async fn delete(&self, event: DeleteSpace) -> AppResult<()>;
 }
