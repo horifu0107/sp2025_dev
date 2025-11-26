@@ -3,8 +3,11 @@ use shared::{
     error::{AppError, AppResult}
 };
 use sqlx::{postgres::PgConnectOptions, PgPool};
-
+use kernel::model::id::{ReservationId};
+use uuid::Uuid;
 pub mod model;
+use sqlx::postgres::PgQueryResult;
+
 
 fn make_pg_connect_options(cfg: &DatabaseConfig) -> PgConnectOptions {
     PgConnectOptions::new()
@@ -29,6 +32,23 @@ impl ConnectionPool {
     pub async fn begin(&self) -> AppResult<sqlx::Transaction<'_, sqlx::Postgres>> {
         self.0.begin().await.map_err(AppError::TransactionError)
     }
+
+    pub async fn mark_reminder_as_done(&self, reservation_id: Uuid) -> AppResult<PgQueryResult> {
+        let result = sqlx::query(
+            r#"
+            UPDATE reservations
+            SET reminder_is_already = TRUE
+            WHERE reservation_id = $1
+            "#,
+        )
+        .bind(reservation_id)
+        .execute(self.inner_ref())
+        .await
+        .map_err(AppError::DbQueryError)?;
+
+        Ok(result)
+    }
+
 }
 
 pub fn connect_database_with(cfg: &DatabaseConfig) -> ConnectionPool {
