@@ -55,7 +55,7 @@ impl From<CreateSpaceRequest> for CreateSpace {
 pub struct UpdateSpaceRequest {
     #[garde(length(min = 1))]
     pub space_name: String,
-    #[garde(skip)]
+    #[garde(skip)] 
     pub is_active: bool,
     #[garde(skip)]
     pub description: String,

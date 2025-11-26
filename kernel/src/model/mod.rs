@@ -4,3 +4,4 @@ pub mod auth;
 pub mod user;
 pub mod role;
 pub mod list;
+pub mod reservation;
