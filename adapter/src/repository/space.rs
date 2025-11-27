@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use derive_new::new;
 use kernel::model::{
+    space::Reservation,
     id::{SpaceId, UserId},
     {space::event::DeleteSpace, list::PaginatedList},
 };
@@ -11,9 +12,10 @@ use kernel::{
     },
     repository::space::SpaceRepository,
 };
+use crate::database::model::space::SpaceReservationRow;
 use crate::database::ConnectionPool;
 use crate::database::model::space::{SpaceRow, PaginatedSpaceRow};
-
+use std::collections::HashMap;
 use shared::error::{AppError, AppResult};
 
 #[derive(new)]
@@ -90,7 +92,18 @@ impl SpaceRepository for SpaceRepositoryImpl {
         .await
         .map_err(AppError::SpecificOperationError)?;
 
-        let items = rows.into_iter().map(Space::from).collect();
+
+        let space_ids = rows.iter().map(|space| space.space_id).collect::<Vec<_>>();
+        let mut reservations = self.find_reservations(&space_ids).await?;
+        let items = rows
+            .into_iter()
+            .map(|row| {
+                let reservation = reservations.remove(&row.space_id);
+                row.into_space(reservation)
+            })
+            .collect();
+
+
         Ok(PaginatedList {
                     total,
                     limit,
@@ -124,11 +137,18 @@ impl SpaceRepository for SpaceRepositoryImpl {
         .await
         .map_err(AppError::SpecificOperationError)?;
 
-        Ok(row.map(Space::from))
+         match row {
+            Some(r) => {
+                let reservation = self.find_reservations(&[r.space_id]).await?.remove(&r.space_id);
+                Ok(Some(r.into_space(reservation)))
+            }
+            None => Ok(None),
+        }
+
     }
     // update は SQL の UPDATE 文に当てはめているだけであるが、
     // 内容を変更できるのは所有者のみとするため、
-    // SQL クエリの WHERE 条件を book_id と user_id の複合条件としている。
+    // SQL クエリの WHERE 条件を space_id と user_id の複合条件としている。
     async fn update(&self, event: UpdateSpace) -> AppResult<()> {
         let res = sqlx::query!(
             r#"
@@ -162,7 +182,7 @@ impl SpaceRepository for SpaceRepositoryImpl {
         Ok(())
     }
     // update と同様に、delete も所有者のみが行えるよう、
-    // SQL クエリの WHERE の条件には book_id と user_id の複合条件にしている。
+    // SQL クエリの WHERE の条件には space_id と user_id の複合条件にしている。
     async fn delete(&self, event: DeleteSpace) -> AppResult<()> {
         let res = sqlx::query!(
             r#"
@@ -182,6 +202,37 @@ impl SpaceRepository for SpaceRepositoryImpl {
         }
 
         Ok(())
+    }
+}
+
+
+impl SpaceRepositoryImpl {
+    // 指定された space_id が貸出中の場合に貸出情報を返すメソッドを追加する
+    async fn find_reservations(&self, space_ids: &[SpaceId]) -> AppResult<HashMap<SpaceId, Reservation>> {
+        let res = sqlx::query_as!(
+            SpaceReservationRow,
+            r#"
+                SELECT
+                r.reservation_id,
+                r.space_id,
+                u.user_id,
+                u.user_name AS user_name,
+                r.reserved_at
+                FROM reservations AS r
+                INNER JOIN users AS u USING(user_id)
+                WHERE space_id = ANY($1)
+                ;
+            "#,
+            space_ids as _
+        )
+        .fetch_all(self.db.inner_ref())
+        .await
+        .map_err(AppError::SpecificOperationError)?
+        .into_iter()
+        .map(|reservation| (reservation.space_id, Reservation::from(reservation)))
+        .collect();
+
+        Ok(res)
     }
 }
 
@@ -215,7 +266,7 @@ mod tests {
         };
 
         repo.create(space,user.id).await?;
-        // find_all を実行するためには BookListOptions 型の値が必要なので作る。
+        // find_all を実行するためには SpaceListOptions 型の値が必要なので作る。
         let options = SpaceListOptions {
             limit: 20,
             offset: 0,
@@ -237,6 +288,7 @@ mod tests {
             equipment,
             address,
             owner,
+            ..
         } = res.unwrap();
         assert_eq!(id, space_id);
         assert_eq!(space_name, "Test SpaceName");
