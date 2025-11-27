@@ -11,6 +11,8 @@ pub enum AppError {
     ValidationError(#[from] garde::Report),
     #[error("トランザクションを実行できませんでした。")]
     TransactionError(#[source] sqlx::Error),
+    #[error("データベース更新処理実行中にエラーが発生しました。")]
+    DbQueryError(#[source] sqlx::Error),
     #[error("データベース処理実行中にエラーが発生しました。")]
     SpecificOperationError(#[source] sqlx::Error),
     #[error("No rows affected: {0}")]
@@ -42,6 +44,7 @@ impl IntoResponse for AppError {
             AppError::UnauthenticatedError | AppError::ForbiddenOperation => StatusCode::FORBIDDEN,
             AppError::UnauthorizedError => StatusCode::UNAUTHORIZED,
             e @ (AppError::TransactionError(_)
+            | AppError::DbQueryError(_)
             | AppError::SpecificOperationError(_)
             | AppError::NoRowsAffectedError(_)
             | AppError::KeyValueStoreError(_)

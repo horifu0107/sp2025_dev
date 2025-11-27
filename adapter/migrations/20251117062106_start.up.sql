@@ -49,7 +49,28 @@ CREATE TABLE IF NOT EXISTS reservations (
     reservation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL,
     space_id UUID NOT NULL,
-    created_at TIMESTAMP(3) WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    reminder_is_already BOOLEAN NOT NULL,
+    reminder_at TIMESTAMP(3) WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    reserved_at TIMESTAMP(3) WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    reservation_start_time TIMESTAMP(3) WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    reservation_end_time TIMESTAMP(3) WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+      ON UPDATE CASCADE
+      ON DELETE CASCADE,
+    FOREIGN KEY (space_id) REFERENCES spaces(space_id)
+      ON UPDATE CASCADE
+      ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS returned_reservations (
+    reservation_id UUID PRIMARY KEY,
+    user_id UUID NOT NULL,
+    space_id UUID NOT NULL,
+    is_cancel BOOLEAN NOT NULL,
+    reminder_is_already BOOLEAN NOT NULL,
+    reminder_at TIMESTAMP(3) WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    reserved_at TIMESTAMP(3) WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    returned_at TIMESTAMP(3) WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     reservation_start_time TIMESTAMP(3) WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     reservation_end_time TIMESTAMP(3) WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     FOREIGN KEY (user_id) REFERENCES users(user_id)
@@ -61,16 +82,6 @@ CREATE TABLE IF NOT EXISTS reservations (
 );
 
 
-
-CREATE TABLE IF NOT EXISTS reminders (
-  reminder_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  is_already BOOLEAN NOT NULL,
-  reservation_id UUID NOT NULL ,
-  remind_time TIMESTAMP(3) WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  FOREIGN KEY (reservation_id) REFERENCES reservations(reservation_id)
-  ON UPDATE CASCADE
-  ON DELETE CASCADE
-);
 
 CREATE TRIGGER spaces_updated_at_trigger
     BEFORE UPDATE ON spaces FOR EACH ROW

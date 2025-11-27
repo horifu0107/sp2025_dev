@@ -153,3 +153,17 @@ impl From<kernel::model::user::SpaceOwner> for SpaceOwner {
         Self { owner_id, owner_name }
     }
 }
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReservationUser {
+    pub user_id: UserId,
+    pub user_name: String,
+}
+
+impl From<kernel::model::user::ReservationUser> for ReservationUser {
+    fn from(value: kernel::model::user::ReservationUser) -> Self {
+        let kernel::model::user::ReservationUser { user_id, user_name } = value;
+        Self { user_id, user_name }
+    }
+}

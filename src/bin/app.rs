@@ -1,5 +1,10 @@
 use adapter::{database::connect_database_with,redis::RedisClient};
 use anyhow::{Error, Result};
+use adapter::{
+    database::{
+        ConnectionPool,
+    },
+};
 use api::route::{
     v1,
     auth};
@@ -32,9 +37,17 @@ use tower_http::LatencyUnit;
 use tracing::Level;
 #[derive(Debug, FromRow)]
 struct Space {
+    reservation_id: Uuid,
+    is_active: bool,
     space_id: Uuid,
+    user_id: Uuid,
+    reminder_is_already: bool,
+    reservation_start_time: DateTime<Utc>,
+    reservation_end_time: DateTime<Utc>,
+    reminder_at: DateTime<Utc>,
+    email: String,
+    user_name: String,
     space_name: String,
-    created_at: DateTime<Utc>,
 }
 
 #[tokio::main]
@@ -43,7 +56,7 @@ async fn main() -> Result<()> {
     bootstrap().await
 }
 
-pub async fn reminder_loop() -> Result<(), Box<dyn StdError>> {
+pub async fn reminder_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>> {
     // --------------------------
     // Gmail OAuth2 認証
     // --------------------------
@@ -61,42 +74,71 @@ pub async fn reminder_loop() -> Result<(), Box<dyn StdError>> {
         .await?;
     let access_token = token.token().unwrap().to_string();
 
-    let pool = PgPoolOptions::new()
-        .connect("postgresql://localhost:5432/app?user=app&password=passwd")
-        .await?;
+    // let pool = PgPoolOptions::new()
+    //     .connect("postgresql://localhost:5432/app?user=app&password=passwd")
+    //     .await?;
 
-    // すでに実行済みの space_id を記録
-    let mut executed: HashSet<Uuid> = HashSet::new();
+    
 
     loop {
         println!("Polling database at: {}", Utc::now());
 
         let rows =
-            sqlx::query_as::<_, Space>("SELECT space_id, space_name, created_at FROM spaces")
-                .fetch_all(&pool)
+            sqlx::query_as::<_, Space>("SELECT r.reservation_id AS reservation_id,
+                    r.space_id AS space_id,
+                    s.is_active AS is_active,
+                    r.reminder_is_already AS reminder_is_already,
+                    r.reminder_at AS reminder_at,
+                    r.reservation_start_time AS reservation_start_time,
+                    r.reservation_end_time AS reservation_end_time,
+                    u.user_id AS user_id,
+                    u.email AS email,
+                    u.user_name AS user_name,
+                    s.space_name AS space_name
+                FROM reservations AS r
+                INNER JOIN users AS u 
+                ON r.user_id = u.user_id
+                INNER JOIN spaces AS s 
+                ON r.space_id = s.space_id;
+                ")
+                .fetch_all(pool.inner_ref())
                 .await?;
 
         let now = Utc::now();
 
         for row in rows {
             // すでに実行済みならスキップ
-            if executed.contains(&row.space_id) {
+
+            if row.reminder_is_already == true || row.is_active == false{
                 continue;
             }
 
-            let target_time = row.created_at + ChronoDuration::minutes(5);
+            // let target_time = row.created_at + ChronoDuration::minutes(5);
 
-            if now >= target_time {
+            if now >= row.reminder_at {
                 // 実行
-                send_gmail(&access_token, row.space_id, row.created_at).await;
+                send_gmail(
+                    &access_token, 
+                    row.space_id, 
+                    row.reminder_at,
+                    row.space_name,
+                    row.user_name,
+                    row.email,
+                    row.reservation_start_time,
+                    row.reservation_end_time,
+                ).await;
 
-                // 二重実行を防ぐ
-                executed.insert(row.space_id);
+                // DB を更新（reminder_is_already = true）
+            if let Err(err) = pool.mark_reminder_as_done(row.reservation_id).await {
+                eprintln!("Failed to update reminder flag: {:?}", err);
+            }
+
+                
             }
         }
 
         // 10秒待機
-        sleep(Duration::from_secs(10)).await;
+        sleep(Duration::from_secs(30)).await;
     }
     // Ok(()) は到達しないが、Rust 的には必要
     #[allow(unreachable_code)]
@@ -129,13 +171,19 @@ async fn bootstrap() -> Result<()> {
     let pool = connect_database_with(&app_config.database);
     let kv = Arc::new(RedisClient::new(&app_config.redis)?);
 
+
+    // reminder_loop に渡す PgPool をクローン
+    let pg_pool_for_loop = pool.clone();
+
+    tokio::spawn(async move {
+        if let Err(e) = reminder_loop(pg_pool_for_loop).await {
+            eprintln!("reminder_loop error: {:?}", e);
+        }
+    });
+
     let registry = AppRegistry::new(pool, kv, app_config);
 
-    //     tokio::spawn(async move {
-    //     if let Err(e) = reminder_loop().await {
-    //         eprintln!("reminder_loop error: {:?}", e);
-    //     }
-    // });
+
 
     let app = Router::new()
         .merge(v1::routes())
@@ -171,24 +219,31 @@ async fn bootstrap() -> Result<()> {
 async fn send_gmail(
     access_token: &str,
     space_id: Uuid,
-    created_at: DateTime<Utc>,
+    reminder_at: DateTime<Utc>,
+    space_name: String,
+    user_name: String,
+    email: String,
+    reservation_start_time: DateTime<Utc>,
+    reservation_end_time: DateTime<Utc>,
 ) -> Result<(), Box<dyn StdError>> {
     println!(
         ">>> [ACTION] Triggered for space_id={} at {}",
         space_id,
         Utc::now()
     );
-    let to = "horikawa0107tokyo@gmail.com";
-    let subject = format!("スペースID {} の通知", space_id);
+    // let to = "horikawa0107tokyo@gmail.com";
+    let subject = format!(" remind mail");
     let body_text = format!(
-        "スペースID {} が {} に作成されてから10分経ちました。",
-        space_id,
-        created_at.format("%Y-%m-%d %H:%M:%S")
+        "{}さん {} の予約の1時間前です。予約時間：{} 〜{}",
+        user_name,
+        space_name,
+        reservation_start_time.format("%Y-%m-%d %H:%M:%S"),
+        reservation_end_time.format("%Y-%m-%d %H:%M:%S")
     );
 
     let message_str = format!(
         "To: {}\r\nSubject: {}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n{}",
-        to, subject, body_text
+        email, subject, body_text
     );
 
     let encoded_message = general_purpose::URL_SAFE_NO_PAD.encode(message_str.as_bytes());

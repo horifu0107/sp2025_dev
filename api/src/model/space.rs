@@ -11,6 +11,12 @@ use derive_new::new;
 use garde::Validate;
 use serde::{Deserialize, Serialize};
 
+use super::user::ReservationUser;
+use chrono::{DateTime, Utc};
+use kernel::model::space::Reservation;
+use kernel::model::id::ReservationId;
+
+
 #[derive(Debug, Deserialize, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSpaceRequest {
@@ -55,7 +61,7 @@ impl From<CreateSpaceRequest> for CreateSpace {
 pub struct UpdateSpaceRequest {
     #[garde(length(min = 1))]
     pub space_name: String,
-    #[garde(skip)]
+    #[garde(skip)] 
     pub is_active: bool,
     #[garde(skip)]
     pub description: String,
@@ -135,7 +141,7 @@ pub struct SpaceResponse {
     pub equipment: String,
     pub address: String,
     pub owner: SpaceOwner,
-
+    pub reservation: Option<SpaceReservationResponse>,
 }
 
 impl From<Space> for SpaceResponse {
@@ -149,6 +155,7 @@ impl From<Space> for SpaceResponse {
             equipment,
             address,
             owner,
+            reservation,
         } = value;
         Self {
             space_id,
@@ -159,6 +166,7 @@ impl From<Space> for SpaceResponse {
             equipment,
             address,
             owner:owner.into(),
+            reservation: reservation.map(SpaceReservationResponse::from),
         }
     }
 }
@@ -188,6 +196,29 @@ impl From<PaginatedList<Space>> for PaginatedSpaceResponse {
             limit,
             offset,
             items: items.into_iter().map(SpaceResponse::from).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpaceReservationResponse {
+    pub reservatio_id: ReservationId,
+    pub reserved_by: ReservationUser,
+    pub reserved_at: DateTime<Utc>,
+}
+
+impl From<Reservation> for SpaceReservationResponse {
+    fn from(value: Reservation) -> Self {
+        let Reservation {
+            reservation_id,
+            reserved_by,
+            reserved_at,
+        } = value;
+        Self {
+            reservatio_id: reservation_id,
+            reserved_by: reserved_by.into(),
+            reserved_at,
         }
     }
 }

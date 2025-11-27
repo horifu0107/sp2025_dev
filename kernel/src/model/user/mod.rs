@@ -17,7 +17,7 @@ pub struct SpaceOwner {
 }
 
 #[derive(Debug)]
-pub struct ReservedUser {
+pub struct ReservationUser {
     pub user_id: UserId,
     pub user_name: String,
 }
