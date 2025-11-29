@@ -5,6 +5,7 @@ use adapter::{
         ConnectionPool,
     },
 };
+use api::handler::reservation::{return_space};
 use api::route::{
     v1,
     auth};
@@ -44,6 +45,7 @@ struct Space {
     reminder_is_already: bool,
     reservation_start_time: DateTime<Utc>,
     reservation_end_time: DateTime<Utc>,
+    reserved_at: DateTime<Utc>,
     reminder_at: DateTime<Utc>,
     email: String,
     user_name: String,
@@ -84,10 +86,12 @@ pub async fn reminder_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>
         println!("Polling database at: {}", Utc::now());
 
         let rows =
-            sqlx::query_as::<_, Space>("SELECT r.reservation_id AS reservation_id,
+            sqlx::query_as::<_, Space>("SELECT 
+            r.reservation_id AS reservation_id,
                     r.space_id AS space_id,
                     s.is_active AS is_active,
                     r.reminder_is_already AS reminder_is_already,
+                    r.reserved_at AS reserved_at,
                     r.reminder_at AS reminder_at,
                     r.reservation_start_time AS reservation_start_time,
                     r.reservation_end_time AS reservation_end_time,
@@ -108,6 +112,7 @@ pub async fn reminder_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>
 
         for row in rows {
             // すでに実行済みならスキップ
+
 
             if row.reminder_is_already == true || row.is_active == false{
                 continue;
@@ -145,6 +150,91 @@ pub async fn reminder_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>
     Ok(())
 }
 
+pub async fn reservation_watcher_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>> {
+    loop {
+        println!("[EndWatcher] Polling database at: {}", Utc::now());
+
+        let mut tx = pool.begin().await?;
+
+
+        let rows = sqlx::query_as::<_, Space>(
+            r#"
+            SELECT
+                r.reservation_id AS reservation_id,
+                r.space_id AS space_id,
+                s.is_active AS is_active,
+                r.reminder_is_already AS reminder_is_already,
+                r.reserved_at AS reserved_at,
+                r.reminder_at AS reminder_at,
+                r.reservation_start_time AS reservation_start_time,
+                r.reservation_end_time AS reservation_end_time,
+                u.user_id AS user_id,
+                u.email AS email,
+                u.user_name AS user_name,
+                s.space_name AS space_name
+            FROM reservations AS r
+            INNER JOIN users AS u 
+                ON r.user_id = u.user_id
+            INNER JOIN spaces AS s 
+                ON r.space_id = s.space_id
+            FOR UPDATE SKIP LOCKED;
+            "#
+        )
+        .fetch_all(pool.inner_ref())
+        .await?;
+
+        let now = Utc::now();
+
+        for row in rows {
+            if now >= row.reservation_end_time {
+                println!(
+                    "Reservation {} has ended. Moving to returned_reservations...",
+                    row.reservation_id
+                );
+
+                // returned_reservations に追加
+                sqlx::query(
+                    r#"
+                    INSERT INTO returned_reservations
+                        (reservation_id, 
+                        user_id, 
+                        space_id, 
+                        is_cancel,
+                        reminder_is_already,
+                        reservation_start_time,
+                        reservation_end_time,
+                        reserved_at,
+                        returned_at,
+                        reminder_at
+                        )
+                    VALUES ($1, $2, $3,false, $4, $5,$6,$7, NOW(),$8)
+                    "#,
+                )
+                .bind(row.reservation_id)
+                .bind(row.user_id)
+                .bind(row.space_id)
+                .bind(row.reminder_is_already)
+                .bind(row.reservation_start_time)
+                .bind(row.reservation_end_time)
+                .bind(row.reserved_at)
+                .bind(row.reminder_at)
+                .execute(pool.inner_ref())
+                .await?;
+
+                // reservations から削除（または update is_active = false）
+                sqlx::query("DELETE FROM reservations WHERE reservation_id = $1")
+                    .bind(row.reservation_id)
+                    .execute(pool.inner_ref())
+                    .await?;
+
+                println!("Reservation {} moved to returned_reservations.", row.reservation_id);
+            }
+        }
+
+        sleep(Duration::from_secs(30)).await;
+    }
+}
+
 fn init_logger() -> Result<()> {
     let log_level = match which() {
         Environment::Development => "debug",
@@ -178,6 +268,14 @@ async fn bootstrap() -> Result<()> {
     tokio::spawn(async move {
         if let Err(e) = reminder_loop(pg_pool_for_loop).await {
             eprintln!("reminder_loop error: {:?}", e);
+        }
+    });
+
+    // reservation_end_time の監視ループ
+    let pg_pool_for_endwatcher = pool.clone();
+    tokio::spawn(async move {
+        if let Err(e) = reservation_watcher_loop(pg_pool_for_endwatcher).await {
+            eprintln!("reservation_watcher_loop error: {:?}", e);
         }
     });
 
@@ -234,9 +332,10 @@ async fn send_gmail(
     // let to = "horikawa0107tokyo@gmail.com";
     let subject = format!(" remind mail");
     let body_text = format!(
-        "{}さん {} の予約の1時間前です。予約時間：{} 〜{}",
+        "{}さん {} の予約の1時間前です。リマインダー時刻：{}予約時間：{} 〜{}",
         user_name,
         space_name,
+        reminder_at,
         reservation_start_time.format("%Y-%m-%d %H:%M:%S"),
         reservation_end_time.format("%Y-%m-%d %H:%M:%S")
     );

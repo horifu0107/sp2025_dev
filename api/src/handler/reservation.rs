@@ -61,7 +61,7 @@ pub async fn return_space(
         reservation_id, 
         space_id, 
         user.id(), 
-        false,
+        true,
         chrono::Utc::now(),
         reservation.reservation_start_time,
         reservation.reservation_end_time,
