@@ -11,6 +11,7 @@ anyhow.workspace = true
 axum.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
+yup-oauth2.workspace = true
 secrecy.workspace = true
 uuid.workspace = true
 strum.workspace = true

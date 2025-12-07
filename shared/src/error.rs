@@ -3,10 +3,18 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum AppError {
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("OAuth error: {0}")]
+    OAuthError(#[from] yup_oauth2::Error),
+    #[error("Other error: {0}")]
+    AnyhowError(#[from] anyhow::Error),
     #[error("{0}")]
     UnprocessableEntity(String),
     #[error("{0}")]
     EntityNotFound(String),
+    #[error("OAuth error: {0}")]
+    ExternalServiceError(String),
     #[error("{0}")]
     ValidationError(#[from] garde::Report),
     #[error("トランザクションを実行できませんでした。")]
@@ -44,7 +52,11 @@ impl IntoResponse for AppError {
             AppError::UnauthenticatedError | AppError::ForbiddenOperation => StatusCode::FORBIDDEN,
             AppError::UnauthorizedError => StatusCode::UNAUTHORIZED,
             e @ (AppError::TransactionError(_)
+            | AppError::ExternalServiceError(_)
             | AppError::DbQueryError(_)
+            | AppError::IoError(_)
+            | AppError::OAuthError(_)
+            | AppError::AnyhowError(_)
             | AppError::SpecificOperationError(_)
             | AppError::NoRowsAffectedError(_)
             | AppError::KeyValueStoreError(_)

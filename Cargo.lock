@@ -69,13 +69,16 @@ dependencies = [
  "anyhow",
  "axum",
  "axum-extra",
+ "base64 0.21.7",
  "chrono",
  "derive-new",
  "garde",
+ "google-gmail1",
  "hyper 0.14.32",
  "kernel",
  "mockall",
  "registry",
+ "reqwest",
  "rstest",
  "serde",
  "serde_json",
@@ -2477,9 +2480,13 @@ name = "registry"
 version = "0.1.0"
 dependencies = [
  "adapter",
+ "anyhow",
+ "google-gmail1",
  "kernel",
  "mockall",
  "shared",
+ "tokio",
+ "yup-oauth2",
 ]
 
 [[package]]
@@ -2977,6 +2984,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tracing",
  "uuid",
+ "yup-oauth2",
 ]
 
 [[package]]

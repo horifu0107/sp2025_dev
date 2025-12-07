@@ -19,7 +19,7 @@ use std::{
 use tokio::net::TcpListener;
 
 use base64::{engine::general_purpose, Engine as _};
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Local};
 use reqwest::Client;
 use sqlx::{postgres::PgPoolOptions, FromRow, PgPool};
 use std::{collections::HashSet, time::Duration};
@@ -36,6 +36,9 @@ use anyhow::Context;
 use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer};
 use tower_http::LatencyUnit;
 use tracing::Level;
+
+
+
 #[derive(Debug, FromRow)]
 struct Space {
     reservation_id: Uuid,
@@ -43,10 +46,10 @@ struct Space {
     space_id: Uuid,
     user_id: Uuid,
     reminder_is_already: bool,
-    reservation_start_time: DateTime<Utc>,
-    reservation_end_time: DateTime<Utc>,
-    reserved_at: DateTime<Utc>,
-    reminder_at: DateTime<Utc>,
+    reservation_start_time: DateTime<Local>,
+    reservation_end_time: DateTime<Local>,
+    reserved_at: DateTime<Local>,
+    reminder_at: DateTime<Local>,
     email: String,
     user_name: String,
     space_name: String,
@@ -83,7 +86,7 @@ pub async fn reminder_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>
     
 
     loop {
-        println!("Polling database at: {}", Utc::now());
+        println!("Polling database at: {}", Local::now());
 
         let rows =
             sqlx::query_as::<_, Space>("SELECT 
@@ -108,7 +111,7 @@ pub async fn reminder_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>
                 .fetch_all(pool.inner_ref())
                 .await?;
 
-        let now = Utc::now();
+        let now = Local::now();
 
         for row in rows {
             // すでに実行済みならスキップ
@@ -117,6 +120,7 @@ pub async fn reminder_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>
             if row.reminder_is_already == true || row.is_active == false{
                 continue;
             }
+            
 
             // let target_time = row.created_at + ChronoDuration::minutes(5);
 
@@ -138,7 +142,7 @@ pub async fn reminder_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>
                 eprintln!("Failed to update reminder flag: {:?}", err);
             }
 
-                
+            
             }
         }
 
@@ -152,7 +156,7 @@ pub async fn reminder_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>
 
 pub async fn reservation_watcher_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>> {
     loop {
-        println!("[EndWatcher] Polling database at: {}", Utc::now());
+        println!("[EndWatcher] Polling database at: {}", Local::now());
 
         let mut tx = pool.begin().await?;
 
@@ -183,7 +187,7 @@ pub async fn reservation_watcher_loop(pool: ConnectionPool) -> Result<(), Box<dy
         .fetch_all(pool.inner_ref())
         .await?;
 
-        let now = Utc::now();
+        let now = Local::now();
 
         for row in rows {
             if now >= row.reservation_end_time {
@@ -235,7 +239,7 @@ pub async fn reservation_watcher_loop(pool: ConnectionPool) -> Result<(), Box<dy
     }
 }
 
-fn init_logger() -> Result<()> {
+fn init_logger() -> anyhow::Result<()> {
     let log_level = match which() {
         Environment::Development => "debug",
         Environment::Production => "info",
@@ -251,7 +255,8 @@ fn init_logger() -> Result<()> {
     tracing_subscriber::registry()
         .with(subscriber)
         .with(env_filter)
-        .try_init()?;
+        .try_init()
+        .context("failed to initialize logger")?;
 
     Ok(())
 }
@@ -261,8 +266,8 @@ async fn bootstrap() -> Result<()> {
     let pool = connect_database_with(&app_config.database);
     let kv = Arc::new(RedisClient::new(&app_config.redis)?);
 
-
-    // reminder_loop に渡す PgPool をクローン
+    
+    // プールとトークンを clone
     let pg_pool_for_loop = pool.clone();
 
     tokio::spawn(async move {
@@ -317,17 +322,17 @@ async fn bootstrap() -> Result<()> {
 async fn send_gmail(
     access_token: &str,
     space_id: Uuid,
-    reminder_at: DateTime<Utc>,
+    reminder_at: DateTime<Local>,
     space_name: String,
     user_name: String,
     email: String,
-    reservation_start_time: DateTime<Utc>,
-    reservation_end_time: DateTime<Utc>,
+    reservation_start_time: DateTime<Local>,
+    reservation_end_time: DateTime<Local>,
 ) -> Result<(), Box<dyn StdError>> {
     println!(
         ">>> [ACTION] Triggered for space_id={} at {}",
         space_id,
-        Utc::now()
+        Local::now()
     );
     // let to = "horikawa0107tokyo@gmail.com";
     let subject = format!(" remind mail");
@@ -364,4 +369,21 @@ async fn send_gmail(
     }
 
     Ok(())
+}
+
+
+async fn get_gmail_access_token() -> Result<String, Box<dyn std::error::Error>> {
+    let secret_path = "/Users/horikawafuka2/Documents/class_2025/sp/test_gmail/client_secret.json";
+    let token_path = "/Users/horikawafuka2/Documents/class_2025/sp/sp2025_dev/token.json";
+
+    let secret = yup_oauth2::read_application_secret(secret_path).await?;
+    let auth = InstalledFlowAuthenticator::builder(secret, InstalledFlowReturnMethod::Interactive)
+        .persist_tokens_to_disk(token_path)
+        .build()
+        .await?;
+
+    let token = auth
+        .token(&["https://www.googleapis.com/auth/gmail.send"])
+        .await?;
+    Ok(token.token().unwrap().to_string())
 }

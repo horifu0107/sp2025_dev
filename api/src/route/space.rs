@@ -6,7 +6,7 @@ use registry::AppRegistry;
 
 use crate::handler::{
     space::{delete_space, register_space, show_space, show_space_list, update_space},
-    reservation::{reservation_space, reservation_history, return_space, show_reserved_list},
+    reservation::{reservation_space, reservation_history, return_space,cancel_space, show_reserved_list},
 };
 
 pub fn build_space_routers() -> Router<AppRegistry> {
@@ -23,6 +23,10 @@ pub fn build_space_routers() -> Router<AppRegistry> {
         .route(
             "/:space_id/reservations/:reservation_id/returned",
             put(return_space),
+        )
+        .route(
+            "/:space_id/canceled",
+            put(cancel_space),
         )
         .route("/:space_id/reservation-history", get(reservation_history));
 

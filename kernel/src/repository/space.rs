@@ -14,5 +14,6 @@ pub trait SpaceRepository: Send + Sync {
     async fn find_all(&self,options: SpaceListOptions) -> AppResult<PaginatedList<Space>>;
     async fn find_by_id(&self, space_id: SpaceId) -> AppResult<Option<Space>>;
     async fn update(&self, event: UpdateSpace) -> AppResult<()>;
+    async fn update_is_active(&self, event: UpdateSpace) -> AppResult<()>;
     async fn delete(&self, event: DeleteSpace) -> AppResult<()>;
 }

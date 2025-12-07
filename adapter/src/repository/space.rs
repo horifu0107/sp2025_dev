@@ -181,6 +181,32 @@ impl SpaceRepository for SpaceRepositoryImpl {
 
         Ok(())
     }
+
+    // is_activeを更新する
+    async fn update_is_active(&self, event: UpdateSpace) -> AppResult<()> {
+        let res = sqlx::query!(
+            r#"
+                UPDATE spaces
+                SET
+                    is_active = $1
+                WHERE space_id = $2
+                AND user_id = $3
+            "#,
+            event.is_active,
+            event.space_id as _,
+            event.requested_user as _
+        )
+        .execute(self.db.inner_ref())
+        .await
+        .map_err(AppError::SpecificOperationError)?;
+        if res.rows_affected() < 1 {
+            return Err(AppError::EntityNotFound("specified space not found".into()));
+        }
+
+        Ok(())
+    }
+
+
     // update と同様に、delete も所有者のみが行えるよう、
     // SQL クエリの WHERE の条件には space_id と user_id の複合条件にしている。
     async fn delete(&self, event: DeleteSpace) -> AppResult<()> {
