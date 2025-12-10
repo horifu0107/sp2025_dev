@@ -9,7 +9,7 @@ use api::handler::reservation::{return_space};
 use api::route::{
     v1,
     auth};
-use axum::Router;
+use axum::{Router,http::Method};
 use registry::AppRegistry;
 use shared::config::AppConfig;
 use std::error::Error as StdError;
@@ -36,6 +36,7 @@ use anyhow::Context;
 use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer};
 use tower_http::LatencyUnit;
 use tracing::Level;
+use tower_http::cors::{self, CorsLayer};
 
 
 
@@ -53,6 +54,14 @@ struct Space {
     email: String,
     user_name: String,
     space_name: String,
+}
+
+// cors 関数を追加
+fn cors() -> CorsLayer {
+    CorsLayer::new()
+        .allow_headers(cors::Any)
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+        .allow_origin(cors::Any)
 }
 
 #[tokio::main]
@@ -142,7 +151,7 @@ pub async fn reminder_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>
                 eprintln!("Failed to update reminder flag: {:?}", err);
             }
 
-            
+
             }
         }
 
@@ -301,6 +310,7 @@ async fn bootstrap() -> Result<()> {
                         .latency_unit(LatencyUnit::Millis),
                 ),
         )
+        .layer(cors())
         .with_state(registry);
 
     let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8080);
@@ -335,14 +345,14 @@ async fn send_gmail(
         Local::now()
     );
     // let to = "horikawa0107tokyo@gmail.com";
-    let subject = format!(" remind mail");
+    let subject = format!("remind mail");
     let body_text = format!(
         "{}さん {} の予約の1時間前です。リマインダー時刻：{}予約時間：{} 〜{}",
         user_name,
         space_name,
         reminder_at,
-        reservation_start_time.format("%Y-%m-%d %H:%M:%S"),
-        reservation_end_time.format("%Y-%m-%d %H:%M:%S")
+        reservation_start_time,
+        reservation_end_time
     );
 
     let message_str = format!(

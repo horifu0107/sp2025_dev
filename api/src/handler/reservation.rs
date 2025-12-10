@@ -33,7 +33,6 @@ pub async fn reservation_space(
     State(registry): State<AppRegistry>,
     Json(req): Json<CreateReservationRequest>,
 ) -> AppResult<StatusCode> {
-    
     // reminder_at を予約開始1時間前へ
     let reminder_at = req.reservation_start_time - chrono::Duration::hours(1);
 

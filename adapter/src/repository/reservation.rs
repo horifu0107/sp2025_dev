@@ -27,6 +27,25 @@ impl ReservationRepository for ReservationRepositoryImpl {
         // トランザクション分離レベルを SERIALIZABLE に設定する
         self.set_transaction_serializable(&mut tx).await?;
 
+
+        // -----------------------------
+        // ① 開始 < 終了 チェック
+        // -----------------------------
+        if event.reservation_start_time >= event.reservation_end_time {
+            return Err(AppError::UnprocessableEntity(
+                "予約開始時刻は予約終了時刻より前である必要があります。".into(),
+            ));
+        }
+        // -----------------------------
+        // ② 開始時刻が現在より未来であることのチェック
+        // -----------------------------
+        let now = chrono::Local::now();
+
+        if event.reservation_start_time <= now {
+            return Err(AppError::UnprocessableEntity(
+                "予約開始時刻は現在時刻より後である必要があります。".into(),
+            ));
+        }
         // 事前のチェックとして、以下を調べる。
         // - 指定のスペース ID をもつスペースが存在するか
         // - 存在した場合、その時間帯は予約中ではないか
@@ -130,6 +149,8 @@ impl ReservationRepository for ReservationRepositoryImpl {
         }
 
         tx.commit().await.map_err(AppError::TransactionError)?;
+
+    
 
         Ok(reservation_id)
     }
