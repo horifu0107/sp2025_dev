@@ -45,6 +45,36 @@ impl SpaceRepository for SpaceRepositoryImpl {
         Ok(())
     }
 
+    
+    // すべてのスペース情報を取得する
+    async fn find_all_space_for_all_cancel(&self) -> AppResult<Vec<Space>> {
+        // reservations テーブルにあるレコードを全件抽出する
+        // spaces テーブルと INNER JOIN し、スペースの情報も一緒に抽出する
+        // 出力するレコードは、予約日の古い順に並べる
+        sqlx::query_as!(
+            SpaceRow,
+            r#"
+                SELECT
+                s.space_id,
+                s.space_name,
+                s.is_active,
+                s.description,
+                s.capacity,
+                s.equipment,
+                s.address,
+                s.user_id AS owned_by,
+                u.user_name AS owner_name
+                FROM spaces AS s
+                INNER JOIN users AS u ON s.user_id  = u.user_id
+                ;
+            "#,
+        )
+        .fetch_all(self.db.inner_ref())
+        .await
+        .map(|rows| rows.into_iter().map(Space::from).collect())
+        .map_err(AppError::SpecificOperationError)
+    }
+
     async fn find_all(&self, options: SpaceListOptions) -> AppResult<PaginatedList<Space>> {
         let SpaceListOptions { limit, offset } = options;
          let rows: Vec<PaginatedSpaceRow> = sqlx::query_as!(

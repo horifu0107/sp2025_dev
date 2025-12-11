@@ -3,7 +3,8 @@ use crate::{
     model::{reservation::{
         CreateReservationRequest, 
         UpdateReservationRequest,
-        ReservationsResponse
+        ReservationsResponse,
+        ReservationResponse
     },
     space::UpdateSpaceRequest,
 },
@@ -238,6 +239,93 @@ pub async fn cancel_space(
 Ok(StatusCode::OK)
 }
 
+
+pub async fn cancel_all_reservation(
+    user: AuthorizedUser,
+    State(registry): State<AppRegistry>,
+) -> AppResult<StatusCode> {
+//すべてのスペース情報を取得する
+    let all_space_info=registry
+        .space_repository()
+        .find_all_space_for_all_cancel()
+        .await?;
+
+    // スペースが無い場合は OK を返す（何も送信しない）
+    if all_space_info.is_empty() {
+        return Ok(StatusCode::OK);
+    }
+    
+
+    for space in all_space_info{
+        let space_id = space.space_id;
+    
+        let update_event = UpdateSpace {
+        space_id,
+        requested_user: user.id(),  // ログインユーザID
+        space_name: None,
+        is_active: Some(false),   // ★ ここを false に変更
+        description: None,
+        capacity: None,
+        equipment: None,
+        address: None,
+    };
+    
+        // spacesテーブルの該当データ（space_idから取得）のis_activeをfalseに更新
+        registry.space_repository().update_is_active(update_event).await?;   
+    
+    
+        // ① 予約情報をスペースIDをもとに DB から取得
+        let reservations = registry
+            .reservation_repository()
+            .find_reservations_by_space_id(space_id)
+            .await?;   // Reservation を返す想定
+        
+        // 予約がないなら Gmail 送信はスキップ
+        if reservations.is_empty() {
+            continue;   // ★ return は絶対ダメ。ループ継続
+        }
+    
+        let access_token = registry.google_access_token().await?;
+    
+        for reservation in reservations {
+            let reservation_id = reservation.reservation_id;
+    
+            let update_canceled = UpdateReturned::new(
+                reservation_id, 
+                space_id, 
+                user.id(), 
+                true,
+                chrono::Local::now(),
+                reservation.reservation_start_time,
+                reservation.reservation_end_time,
+                reservation.reminder_at,
+            );
+        
+            registry
+                .reservation_repository()
+                .update_returned(update_canceled)
+                .await?;
+    
+        
+            // ④ Gmail を送信
+            send_cancel_gmail(
+                &access_token,
+                space_id,
+                reservation.reminder_at,
+                reservation.space.space_name,
+                reservation.user_name,
+                reservation.email,
+                reservation.reservation_start_time,
+                reservation.reservation_end_time,
+            )
+            .await
+            .map_err(|e| AppError::ExternalServiceError(format!("Gmail error: {e}")))?;
+        }
+    }
+Ok(StatusCode::OK)
+}
+
+
 pub async fn show_reserved_list(
     _user: AuthorizedUser,
     State(registry): State<AppRegistry>,
@@ -247,6 +335,19 @@ pub async fn show_reserved_list(
         .find_unreturned_all()
         .await
         .map(ReservationsResponse::from)
+        .map(Json)
+}
+
+pub async fn return_reservation_by_id(
+    _user: AuthorizedUser,
+    Path(reservation_id): Path<ReservationId>,
+    State(registry): State<AppRegistry>,
+) -> AppResult<Json<ReservationResponse>> {
+    registry
+        .reservation_repository()
+        .find_by_id(reservation_id)
+        .await
+        .map(ReservationResponse::from)
         .map(Json)
 }
 
