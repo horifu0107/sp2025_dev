@@ -21,15 +21,34 @@ pub struct ReservationRepositoryImpl {
 #[async_trait]
 impl ReservationRepository for ReservationRepositoryImpl {
     // 予約操作を行う
-    async fn create(&self, event: CreateReservation) -> AppResult<()> {
+    async fn create(&self, event: CreateReservation) -> AppResult<ReservationId> {
         let mut tx = self.db.begin().await?;
 
         // トランザクション分離レベルを SERIALIZABLE に設定する
         self.set_transaction_serializable(&mut tx).await?;
 
+
+        // -----------------------------
+        // ① 開始 < 終了 チェック
+        // -----------------------------
+        if event.reservation_start_time >= event.reservation_end_time {
+            return Err(AppError::UnprocessableEntity(
+                "予約開始時刻は予約終了時刻より前である必要があります。".into(),
+            ));
+        }
+        // -----------------------------
+        // ② 開始時刻が現在より未来であることのチェック
+        // -----------------------------
+        let now = chrono::Local::now();
+
+        if event.reservation_start_time <= now {
+            return Err(AppError::UnprocessableEntity(
+                "予約開始時刻は現在時刻より後である必要があります。".into(),
+            ));
+        }
         // 事前のチェックとして、以下を調べる。
         // - 指定のスペース ID をもつスペースが存在するか
-        // - 存在した場合、このスペースは予約中ではないか
+        // - 存在した場合、その時間帯は予約中ではないか
         //
         // 上記の両方が Yes だった場合、このブロック以降の処理に進む
         {
@@ -131,7 +150,9 @@ impl ReservationRepository for ReservationRepositoryImpl {
 
         tx.commit().await.map_err(AppError::TransactionError)?;
 
-        Ok(())
+    
+
+        Ok(reservation_id)
     }
 
     // 予約終了操作を行う
@@ -144,7 +165,7 @@ impl ReservationRepository for ReservationRepositoryImpl {
         // 予約終了操作時は事前のチェックとして、以下を調べる。
         // - 指定のスペース ID をもつスペースが存在するか
         // - 存在した場合、
-        // - このスペースは予約中であり
+        // - このスペースの予約データがあり
         // - かつ、借りたユーザーが指定のユーザーと同じか
         //
         // 上記の両方が Yes だった場合、このブロック以降の処理に進む
@@ -200,13 +221,13 @@ impl ReservationRepository for ReservationRepositoryImpl {
             //
             // ③ reservation_end_time が現在時刻より前か
             //
-            let now = chrono::Utc::now();
-            if res_row.reservation_end_time > now {
-                return Err(AppError::UnprocessableEntity(format!(
-                    "予約（ID={}）はまだ終了していません（reservation_end_time が現在より未来です）",
-                    event.reservation_id
-                )));
-            }
+            // let now = chrono::Local::now();
+            // if res_row.reservation_end_time > now {
+            //     return Err(AppError::UnprocessableEntity(format!(
+            //         "予約（ID={}）はまだ終了していません（reservation_end_time が現在より未来です）",
+            //         event.reservation_id
+            //     )));
+            // }
         }
 
         // データベース上の予約終了操作として、
@@ -273,6 +294,8 @@ impl ReservationRepository for ReservationRepositoryImpl {
                 r.reservation_id,
                 r.space_id,
                 r.user_id,
+                u.user_name,
+                u.email,
                 r.reservation_start_time,
                 r.reservation_end_time,
                 r.reserved_at,
@@ -284,7 +307,8 @@ impl ReservationRepository for ReservationRepositoryImpl {
                 s.equipment,
                 s.address
                 FROM reservations AS r
-                INNER JOIN spaces AS s USING(space_id)
+                INNER JOIN spaces AS s ON r.space_id = s.space_id
+                INNER JOIN users AS u ON r.user_id  = u.user_id
                 ORDER BY r.reserved_at ASC
                 ;
             "#,
@@ -294,6 +318,31 @@ impl ReservationRepository for ReservationRepositoryImpl {
         .map(|rows| rows.into_iter().map(Reservation::from).collect())
         .map_err(AppError::SpecificOperationError)
     }
+
+    // reminder_is_alreadyを更新する
+    async fn update_reminder_is_already(&self,reservation_id:ReservationId,reminder_is_already:bool) -> AppResult<()> {
+        // reservations テーブルの該当データのreminder_is_alreadyを更新する
+        let res = sqlx::query!(
+            r#"
+                UPDATE reservations
+                SET
+                    reminder_is_already = $1
+                WHERE reservation_id = $2
+            "#,
+            reminder_is_already,
+            reservation_id as _
+            )
+        .execute(self.db.inner_ref())
+        .await
+        .map_err(AppError::SpecificOperationError)?;
+        if res.rows_affected() < 1 {
+            return Err(AppError::EntityNotFound("specified reservation not found".into()));
+        }
+
+        Ok(())
+    }
+
+
 
     // ユーザー ID に紐づく未予約終了の予約情報を取得する
     async fn find_unreturned_by_user_id(&self, user_id: UserId) -> AppResult<Vec<Reservation>> {
@@ -306,6 +355,8 @@ impl ReservationRepository for ReservationRepositoryImpl {
                 r.reservation_id,
                 r.space_id,
                 r.user_id,
+                u.user_name,
+                u.email,
                 r.reservation_start_time,
                 r.reservation_end_time,
                 r.reserved_at,
@@ -317,7 +368,8 @@ impl ReservationRepository for ReservationRepositoryImpl {
                 s.equipment,
                 s.address
                 FROM reservations AS r
-                INNER JOIN spaces AS s USING(space_id)
+                INNER JOIN spaces AS s ON r.space_id = s.space_id
+                INNER JOIN users AS u ON r.user_id  = u.user_id
                 WHERE r.user_id = $1
                 ORDER BY r.reserved_at ASC
                 ;
@@ -346,6 +398,8 @@ impl ReservationRepository for ReservationRepositoryImpl {
                 rr.reservation_id,
                 rr.space_id,
                 rr.user_id,
+                u.user_name,
+                u.email,
                 rr.is_cancel,
                 rr.reminder_is_already,
                 rr.reserved_at,
@@ -359,7 +413,8 @@ impl ReservationRepository for ReservationRepositoryImpl {
                 s.equipment,
                 s.address
                 FROM returned_reservations AS rr
-                INNER JOIN spaces AS s USING(space_id)
+                INNER JOIN spaces AS s ON rr.space_id = s.space_id
+                INNER JOIN users AS u ON rr.user_id = u.user_id
                 WHERE s.space_id = $1
                 ORDER BY rr.reserved_at DESC
             "#,
@@ -380,14 +435,19 @@ impl ReservationRepository for ReservationRepositoryImpl {
         Ok(reservation_histories)
     }
 
-    async fn find_by_id(&self, reservation_id: ReservationId) -> AppResult<Reservation>{
-        let row : Reservation= sqlx::query_as!(
+    // スペースの予約（予約終了済みを含まない）を取得する
+    async fn find_reservations_by_space_id(&self, space_id: SpaceId) -> AppResult<Vec<Reservation>> {
+        // このメソッドでは、予約中を取得して
+        // スペースに対する予約の一覧として返す必要がある。
+        let row : Vec<Reservation>= sqlx::query_as!(
             ReservationRow,
             r#"
                 SELECT
                 r.reservation_id,
                 r.space_id,
                 r.user_id,
+                u.user_name,
+                u.email,
                 r.reservation_start_time,
                 r.reservation_end_time,
                 r.reserved_at,
@@ -399,7 +459,47 @@ impl ReservationRepository for ReservationRepositoryImpl {
                 s.equipment,
                 s.address
                 FROM reservations AS r
-                INNER JOIN spaces AS s USING(space_id)
+                INNER JOIN spaces AS s ON r.space_id = s.space_id
+                INNER JOIN users AS u ON r.user_id  = u.user_id
+                WHERE r.space_id = $1
+                ;
+            "#,
+            space_id as _
+        )
+        .fetch_all(self.db.inner_ref())
+        .await
+        .map_err(AppError::SpecificOperationError)?
+        .into_iter()
+        .map(Reservation::from)
+        .collect();
+        
+    
+        Ok(row.into())
+    }
+
+    async fn find_by_id(&self, reservation_id: ReservationId) -> AppResult<Reservation>{
+        let row : Reservation= sqlx::query_as!(
+            ReservationRow,
+            r#"
+                SELECT
+                r.reservation_id,
+                r.space_id,
+                r.user_id,
+                u.user_name,
+                u.email,
+                r.reservation_start_time,
+                r.reservation_end_time,
+                r.reserved_at,
+                r.reminder_at,
+                r.reminder_is_already,
+                s.space_name,
+                s.is_active,
+                s.capacity,
+                s.equipment,
+                s.address
+                FROM reservations AS r
+                INNER JOIN spaces AS s ON r.space_id = s.space_id
+                INNER JOIN users AS u ON r.user_id  = u.user_id
                 WHERE r.reservation_id = $1
                 ;
             "#,
@@ -440,6 +540,8 @@ impl ReservationRepositoryImpl {
                 r.reservation_id,
                 r.space_id,
                 r.user_id,
+                u.user_name,
+                u.email,
                 r.reservation_start_time,
                 r.reservation_end_time,
                 r.reserved_at,
@@ -451,7 +553,8 @@ impl ReservationRepositoryImpl {
                 s.equipment,
                 s.address
                 FROM reservations AS r
-                INNER JOIN spaces AS s USING(space_id)
+                INNER JOIN spaces AS s ON r.space_id = s.space_id
+                INNER JOIN users AS u ON r.user_id  = u.user_id
                 WHERE s.space_id = $1
             "#,
             space_id as _,

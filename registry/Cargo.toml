@@ -10,3 +10,7 @@ adapter.workspace = true
 kernel.workspace = true
 shared.workspace = true
 mockall.workspace = true
+google-gmail1.workspace = true
+yup-oauth2.workspace = true
+anyhow.workspace = true
+tokio.workspace = true

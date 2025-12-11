@@ -1,6 +1,6 @@
 pub mod event;
 use super::{id::{SpaceId,ReservationId}, user::{SpaceOwner,ReservationUser}};
-use chrono::{DateTime,Utc};
+use chrono::{DateTime,Local};
 
 #[derive(Debug)]
 pub struct Space {
@@ -29,5 +29,5 @@ pub struct SpaceListOptions {
 pub struct Reservation {
     pub reservation_id: ReservationId,
     pub reserved_by: ReservationUser,
-    pub reserved_at: DateTime<Utc>,
+    pub reserved_at: DateTime<Local>,
 }

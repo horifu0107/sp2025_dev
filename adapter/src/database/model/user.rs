@@ -1,6 +1,6 @@
 use kernel::model::{id::UserId, role::Role, user::User};
 use shared::error::AppError;
-use sqlx::types::chrono::{DateTime, Utc};
+use sqlx::types::chrono::{DateTime, Local};
 use std::str::FromStr;
 
 pub struct UserRow {
@@ -8,8 +8,8 @@ pub struct UserRow {
     pub user_name: String,
     pub email: String,
     pub role_name: String,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: DateTime<Local>,
+    pub updated_at: DateTime<Local>,
 }
 
 impl TryFrom<UserRow> for User {

@@ -13,7 +13,37 @@ pub struct SpaceRow {
     pub address: String,
     pub owned_by:UserId,
 }
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local};
+
+impl From<SpaceRow> for Space {
+    fn from(value: SpaceRow) -> Self {
+        let SpaceRow {
+            space_id,
+            space_name,
+            is_active,
+            capacity,
+            description,
+            equipment,
+            address,
+            owner_name,
+            owned_by,
+        } = value;
+        Space {
+            space_id,
+            space_name,
+            is_active,
+            capacity,
+            description,
+            equipment,
+            address,
+            owner: SpaceOwner {
+                owner_id:owned_by,
+                owner_name:owner_name,
+            },
+            reservation: None, // ★ 追加
+        }
+    }
+}
 
 // From トレイトの実装の代わりに、引数をとる into_space メソッドを定義し実装する
 impl SpaceRow {
@@ -58,7 +88,7 @@ pub struct SpaceReservationRow {
     pub space_id: SpaceId,
     pub user_id: UserId,
     pub user_name: String,
-    pub reserved_at: DateTime<Utc>,
+    pub reserved_at: DateTime<Local>,
 }
 
 // Reservation 型に変換する From トレイト実装を追加

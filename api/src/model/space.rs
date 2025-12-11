@@ -12,7 +12,7 @@ use garde::Validate;
 use serde::{Deserialize, Serialize};
 
 use super::user::ReservationUser;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local};
 use kernel::model::space::Reservation;
 use kernel::model::id::ReservationId;
 
@@ -60,17 +60,17 @@ impl From<CreateSpaceRequest> for CreateSpace {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSpaceRequest {
     #[garde(length(min = 1))]
-    pub space_name: String,
+    pub space_name: Option<String>,
     #[garde(skip)] 
-    pub is_active: bool,
+    pub is_active: Option<bool>,
     #[garde(skip)]
-    pub description: String,
+    pub description: Option<String>,
     #[garde(range(min=1))]
-    pub capacity: i32,
+    pub capacity: Option<i32>,
     #[garde(length(min = 1))]
-    pub equipment: String,
+    pub equipment: Option<String>,
     #[garde(skip)]
-    pub address: String,
+    pub address: Option<String>,
 }
 
 // パスパラメータからの SpaceId、
@@ -205,7 +205,7 @@ impl From<PaginatedList<Space>> for PaginatedSpaceResponse {
 pub struct SpaceReservationResponse {
     pub reservatio_id: ReservationId,
     pub reserved_by: ReservationUser,
-    pub reserved_at: DateTime<Utc>,
+    pub reserved_at: DateTime<Local>,
 }
 
 impl From<Reservation> for SpaceReservationResponse {

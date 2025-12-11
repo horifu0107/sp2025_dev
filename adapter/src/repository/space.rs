@@ -45,6 +45,36 @@ impl SpaceRepository for SpaceRepositoryImpl {
         Ok(())
     }
 
+    
+    // すべてのスペース情報を取得する
+    async fn find_all_space_for_all_cancel(&self) -> AppResult<Vec<Space>> {
+        // reservations テーブルにあるレコードを全件抽出する
+        // spaces テーブルと INNER JOIN し、スペースの情報も一緒に抽出する
+        // 出力するレコードは、予約日の古い順に並べる
+        sqlx::query_as!(
+            SpaceRow,
+            r#"
+                SELECT
+                s.space_id,
+                s.space_name,
+                s.is_active,
+                s.description,
+                s.capacity,
+                s.equipment,
+                s.address,
+                s.user_id AS owned_by,
+                u.user_name AS owner_name
+                FROM spaces AS s
+                INNER JOIN users AS u ON s.user_id  = u.user_id
+                ;
+            "#,
+        )
+        .fetch_all(self.db.inner_ref())
+        .await
+        .map(|rows| rows.into_iter().map(Space::from).collect())
+        .map_err(AppError::SpecificOperationError)
+    }
+
     async fn find_all(&self, options: SpaceListOptions) -> AppResult<PaginatedList<Space>> {
         let SpaceListOptions { limit, offset } = options;
          let rows: Vec<PaginatedSpaceRow> = sqlx::query_as!(
@@ -181,6 +211,32 @@ impl SpaceRepository for SpaceRepositoryImpl {
 
         Ok(())
     }
+
+    // is_activeを更新する
+    async fn update_is_active(&self, event: UpdateSpace) -> AppResult<()> {
+        let res = sqlx::query!(
+            r#"
+                UPDATE spaces
+                SET
+                    is_active = $1
+                WHERE space_id = $2
+                AND user_id = $3
+            "#,
+            event.is_active,
+            event.space_id as _,
+            event.requested_user as _
+        )
+        .execute(self.db.inner_ref())
+        .await
+        .map_err(AppError::SpecificOperationError)?;
+        if res.rows_affected() < 1 {
+            return Err(AppError::EntityNotFound("specified space not found".into()));
+        }
+
+        Ok(())
+    }
+
+
     // update と同様に、delete も所有者のみが行えるよう、
     // SQL クエリの WHERE の条件には space_id と user_id の複合条件にしている。
     async fn delete(&self, event: DeleteSpace) -> AppResult<()> {

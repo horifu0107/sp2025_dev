@@ -2,7 +2,7 @@ use kernel::model::{
     reservation::{Reservation, ReservationSpace},
     id::{SpaceId, ReservationId, UserId},
 };
-use sqlx::types::chrono::{DateTime, Utc};
+use sqlx::types::chrono::{DateTime, Local};
 
 // 貸し出し状態を確認するための型
 // 蔵書が存在する場合はこの型にはまるレコードが存在し、
@@ -11,7 +11,7 @@ use sqlx::types::chrono::{DateTime, Utc};
 pub struct ReservationStateRow {
     pub space_id: SpaceId,
     pub reminder_is_already:bool,
-    pub reminder_at:DateTime<Utc>,
+    pub reminder_at:DateTime<Local>,
     pub reservation_id: ReservationId,
     pub user_id:UserId,
 }
@@ -21,10 +21,12 @@ pub struct ReservationRow {
     pub reservation_id: ReservationId,
     pub space_id: SpaceId,
     pub user_id: UserId,
-    pub reservation_start_time: DateTime<Utc>,
-    pub reservation_end_time: DateTime<Utc>,
-    pub reserved_at: DateTime<Utc>,
-    pub reminder_at: DateTime<Utc>,
+    pub user_name: String,
+    pub email: String,
+    pub reservation_start_time: DateTime<Local>,
+    pub reservation_end_time: DateTime<Local>,
+    pub reserved_at: DateTime<Local>,
+    pub reminder_at: DateTime<Local>,
     pub reminder_is_already:bool,
     pub space_name: String,
     pub is_active: bool,
@@ -40,6 +42,8 @@ impl From<ReservationRow> for Reservation {
             reservation_id,
             space_id,
             user_id,
+            user_name,
+            email,
             reservation_start_time,
             reservation_end_time,
             reminder_at,
@@ -54,6 +58,8 @@ impl From<ReservationRow> for Reservation {
         Reservation {
             reservation_id: reservation_id,
             reserved_by: user_id,
+            user_name,
+            email,
             reserved_at,
             reminder_at,
             reminder_is_already,
@@ -78,13 +84,15 @@ pub struct ReturnedReservationRow {
     pub reservation_id: ReservationId,
     pub space_id: SpaceId,
     pub user_id: UserId,
+    pub user_name: String,
+    pub email: String,
     pub is_cancel: bool,
     pub reminder_is_already: bool,
-    pub reserved_at: DateTime<Utc>,
-    pub reminder_at: DateTime<Utc>,
-    pub returned_at: DateTime<Utc>,
-    pub reservation_start_time:DateTime<Utc>,
-    pub reservation_end_time:DateTime<Utc>,
+    pub reserved_at: DateTime<Local>,
+    pub reminder_at: DateTime<Local>,
+    pub returned_at: DateTime<Local>,
+    pub reservation_start_time:DateTime<Local>,
+    pub reservation_end_time:DateTime<Local>,
     pub space_name: String,
     pub is_active: bool,
     pub capacity: i32,
@@ -98,6 +106,8 @@ impl From<ReturnedReservationRow> for Reservation {
             reservation_id,
             space_id,
             user_id,
+            user_name,
+            email,
             is_cancel: _,
             reminder_is_already,
             reserved_at,
@@ -114,6 +124,8 @@ impl From<ReturnedReservationRow> for Reservation {
         Reservation {
             reservation_id: reservation_id,
             reserved_by: user_id,
+            user_name,
+            email,
             reminder_is_already,
             reserved_at,
             reminder_at,

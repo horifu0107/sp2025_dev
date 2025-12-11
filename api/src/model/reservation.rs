@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc,Local};
+use chrono::{DateTime,Local};
 use kernel::model::{
     reservation::{Reservation, ReservationSpace},
     id::{SpaceId, ReservationId, UserId},
@@ -27,9 +27,9 @@ impl From<Vec<Reservation>> for ReservationsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct CreateReservationRequest {
     #[garde(skip)]
-    pub reservation_start_time: DateTime<Utc>,
+    pub reservation_start_time: DateTime<Local>,
     #[garde(skip)] 
-    pub reservation_end_time: DateTime<Utc>,
+    pub reservation_end_time: DateTime<Local>,
 }
 
 // 蔵書データの更新用の型を追加する
@@ -37,9 +37,9 @@ pub struct CreateReservationRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateReservationRequest {
     #[garde(skip)]
-    pub reservation_start_time: DateTime<Utc>,
+    pub reservation_start_time: DateTime<Local>,
     #[garde(skip)] 
-    pub reservation_end_time: DateTime<Utc>,
+    pub reservation_end_time: DateTime<Local>,
 }
 
 #[derive(Serialize)]
@@ -47,12 +47,14 @@ pub struct UpdateReservationRequest {
 pub struct ReservationResponse {
     pub reservation_id: ReservationId,
     pub reserved_by: UserId,
+    pub user_name: String,
+    pub email: String,
     pub reminder_is_already: bool,
-    pub reserved_at: DateTime<Utc>,
-    pub reminder_at: DateTime<Utc>,
-    pub returned_at: Option<DateTime<Utc>>,
-    pub reservation_start_time:DateTime<Utc>,
-    pub reservation_end_time:DateTime<Utc>,
+    pub reserved_at: DateTime<Local>,
+    pub reminder_at: DateTime<Local>,
+    pub returned_at: Option<DateTime<Local>>,
+    pub reservation_start_time:DateTime<Local>,
+    pub reservation_end_time:DateTime<Local>,
     pub space: ReservationSpaceResponse,
 }
 
@@ -61,6 +63,8 @@ impl From<Reservation> for ReservationResponse {
         let Reservation {
             reservation_id,
             reserved_by,
+            user_name,
+            email,
             reminder_is_already,
             reserved_at,
             reminder_at,
@@ -72,6 +76,8 @@ impl From<Reservation> for ReservationResponse {
         Self {
             reservation_id,
             reserved_by,
+            user_name,
+            email,
             reminder_is_already,
             reserved_at,
             reminder_at,
