@@ -13,6 +13,7 @@ use crate::handler::{
         return_space,
         cancel_space, 
         cancel_all_reservation,
+        stop_reservation_service,
         show_reserved_list},
 };
 
@@ -37,8 +38,12 @@ pub fn build_space_routers() -> Router<AppRegistry> {
             put(cancel_space),
         )
         .route(
-            "/all/canceled",
+            "/all-reservation/canceled",
             put(cancel_all_reservation),
+        )
+        .route(
+            "/stop/service",
+            put(stop_reservation_service),
         )
         .route("/:space_id/reservation-history", get(reservation_history));
 

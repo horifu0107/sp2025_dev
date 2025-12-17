@@ -72,7 +72,7 @@ impl UserRepository for UserRepositoryImpl {
         let user_id = UserId::new();
         let hashed_password = hash_password(&event.password)?;
         // ユーザーを追加するときは管理者ではなく一般のユーザー権限とする
-        let role = Role::User;
+        let role = Role::Admin;
         let res = sqlx::query!(
             r#"
                 INSERT INTO users(user_id,user_name, email, password_hash, role_id)

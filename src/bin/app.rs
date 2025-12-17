@@ -135,7 +135,7 @@ pub async fn reminder_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>
 
             if now >= row.reminder_at {
                 // 実行
-                send_gmail(
+                send_remind_gmail(
                     &access_token, 
                     row.space_id, 
                     row.reminder_at,
@@ -150,8 +150,6 @@ pub async fn reminder_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>
             if let Err(err) = pool.mark_reminder_as_done(row.reservation_id).await {
                 eprintln!("Failed to update reminder flag: {:?}", err);
             }
-
-
             }
         }
 
@@ -164,6 +162,23 @@ pub async fn reminder_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>
 }
 
 pub async fn reservation_watcher_loop(pool: ConnectionPool) -> Result<(), Box<dyn StdError>> {
+    // --------------------------
+    // Gmail OAuth2 認証
+    // --------------------------
+    let secret_path = "/Users/horikawafuka2/Documents/class_2025/sp/test_gmail/client_secret_483730081753-qm9ujsmkcgfpag17j2iv618fspsjpgou.apps.googleusercontent.com.json";
+    let token_path = "/Users/horikawafuka2/Documents/class_2025/sp/test_gmail/token.json";
+
+    let secret = yup_oauth2::read_application_secret(secret_path).await?;
+    let auth = InstalledFlowAuthenticator::builder(secret, InstalledFlowReturnMethod::Interactive)
+        .persist_tokens_to_disk(token_path)
+        .build()
+        .await?;
+
+    let token = auth
+        .token(&["https://www.googleapis.com/auth/gmail.send"])
+        .await?;
+    let access_token = token.token().unwrap().to_string();
+
     loop {
         println!("[EndWatcher] Polling database at: {}", Local::now());
 
@@ -241,7 +256,20 @@ pub async fn reservation_watcher_loop(pool: ConnectionPool) -> Result<(), Box<dy
                     .await?;
 
                 println!("Reservation {} moved to returned_reservations.", row.reservation_id);
+                
+                send_thanks_gmail(
+                    &access_token, 
+                    row.space_id, 
+                    row.reminder_at,
+                    row.space_name,
+                    row.user_name,
+                    row.email,
+                    row.reservation_start_time,
+                    row.reservation_end_time,
+                ).await;
+
             }
+    
         }
 
         sleep(Duration::from_secs(30)).await;
@@ -329,7 +357,7 @@ async fn bootstrap() -> Result<()> {
 // ----------------------------------------------
 // Gmail送信処理
 // ----------------------------------------------
-async fn send_gmail(
+async fn send_remind_gmail(
     access_token: &str,
     space_id: Uuid,
     reminder_at: DateTime<Local>,
@@ -344,21 +372,67 @@ async fn send_gmail(
         space_id,
         Local::now()
     );
-    // let to = "horikawa0107tokyo@gmail.com";
+    // --------------------------------------------
+    // 🔸 現在時刻との差分を計算
+    // --------------------------------------------
+    let now = Local::now();
+
+    let diff = reservation_start_time.signed_duration_since(now);
+
+    // すでに開始時刻を過ぎている
+    if diff.num_seconds() < 0 {
+        println!("すでに予約開始時刻を過ぎているため、リマインダーを送信しません。");
+        return Ok(());
+    }
+
+    // chrono::Duration → std::time::Duration
+    let std_dur = diff
+        .to_std()
+        .unwrap_or(std::time::Duration::from_secs(0));
+
+    // 秒 → 分へ変換
+    let minutes = std_dur.as_secs() / 60;
+
+    // 「◯時間前」「◯分前」などの表記を作成
+    let before_text = if minutes >= 60 {
+        format!("{}時間{}分前", minutes / 60, minutes % 60)
+    } else {
+        format!("{}分前", minutes)
+    };
+
+    // --------------------------------------------
+    // 🔸 Gmail文面
+    // --------------------------------------------
     let subject = format!("remind mail");
     let body_text = format!(
-        "{}さん {} の予約の1時間前です。リマインダー時刻：{}予約時間：{} 〜{}",
+        "{}さん\n{}の予約の{}です。\nリマインダー時刻：{}\n予約時間：{} 〜 {}",
         user_name,
         space_name,
-        reminder_at,
-        reservation_start_time,
-        reservation_end_time
+        before_text, // ← ここに動的な残り時間が入る！
+        reminder_at.format("%Y-%m-%d %H:%M:%S"),
+        reservation_start_time.format("%Y-%m-%d %H:%M:%S"),
+        reservation_end_time.format("%Y-%m-%d %H:%M:%S")
     );
 
     let message_str = format!(
         "To: {}\r\nSubject: {}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n{}",
         email, subject, body_text
     );
+
+    // let subject = format!("remind mail");
+    // let body_text = format!(
+    //     "{}さん \n{} の予約の1時間前です。\nリマインダー時刻：{}\n予約時間：{} 〜{}",
+    //     user_name,
+    //     space_name,
+    //     reminder_at,
+    //     reservation_start_time,
+    //     reservation_end_time
+    // );
+
+    // let message_str = format!(
+    //     "To: {}\r\nSubject: {}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n{}",
+    //     email, subject, body_text
+    // );
 
     let encoded_message = general_purpose::URL_SAFE_NO_PAD.encode(message_str.as_bytes());
 
@@ -376,6 +450,61 @@ async fn send_gmail(
         println!("✅ Gmail 送信成功");
     } else {
         eprintln!("❌ Gmail送信失敗: {}", res.text().await?);
+    }
+
+    Ok(())
+}
+
+async fn send_thanks_gmail(
+    access_token: &str,
+    space_id: Uuid,
+    reminder_at: DateTime<Local>,
+    space_name: String,
+    user_name: String,
+    email: String,
+    reservation_start_time: DateTime<Local>,
+    reservation_end_time: DateTime<Local>,
+) -> Result<(), Box<dyn StdError>> {
+    println!(
+        ">>> [ACTION] Triggered for space_id={} at {}",
+        space_id,
+        Local::now()
+    );
+
+    // --------------------------------------------
+    // 🔸 Gmail文面
+    // --------------------------------------------
+    let subject = format!("thanks mail");
+    let body_text = format!(
+        "{}さん\n{}の予約が終了しました。またどうぞご利用ください。\n予約時間：{} 〜 {}",
+        user_name,
+        space_name,
+        reservation_start_time.format("%Y-%m-%d %H:%M:%S"),
+        reservation_end_time.format("%Y-%m-%d %H:%M:%S")
+    );
+
+    let message_str = format!(
+        "To: {}\r\nSubject: {}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n{}",
+        email, subject, body_text
+    );
+
+
+    let encoded_message = general_purpose::URL_SAFE_NO_PAD.encode(message_str.as_bytes());
+
+    let url = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
+    let client = Client::new();
+
+    let res = client
+        .post(url)
+        .bearer_auth(access_token)
+        .json(&serde_json::json!({ "raw": encoded_message }))
+        .send()
+        .await?;
+
+    if res.status().is_success() {
+        println!("✅ 感謝Gmail 送信成功");
+    } else {
+        eprintln!("❌ 感謝Gmail送信失敗: {}", res.text().await?);
     }
 
     Ok(())
